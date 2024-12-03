@@ -12,7 +12,7 @@ A123456789
 "clientIp": "180.217.164.218",
 "otpStatus": "B",
 "deviceId": "0000000543",
-"dataSource": "cathaySec",
+"dataSource": "kasaySec",
 "functionItem": "V"
 }
 
