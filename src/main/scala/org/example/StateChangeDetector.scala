@@ -8,7 +8,7 @@ import org.apache.spark.sql.types.{StringType, StructField, StructType, Timestam
 import org.example.UserStateHandler.updateState
 
 
-object StateChangeDetetor {
+object StateChangeDetector {
   private final val arg_kafka_servers: String = sys.env.getOrElse("ARG_KAFKA_SERVERS", "default_value")
 
   def main(args: Array[String]): Unit = {
