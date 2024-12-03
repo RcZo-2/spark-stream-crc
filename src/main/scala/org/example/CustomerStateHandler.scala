@@ -18,13 +18,9 @@ case class OutputAnomaly(userId: String,
                         )
 
 object UserStateHandler {
-  private final val arg_mongo_uri: String = sys.env.getOrElse("ARG_MONGO_URI", "default_value")
-  private final val arg_mongo_db: String = sys.env.getOrElse("ARG_MONGO_DB", "default_value")
-  private final val arg_mongo_coll: String = sys.env.getOrElse("ARG_MONGO_COLL", "default_value")
-
-  private final val mongoClient: MongoClient = MongoClients.create(s"${arg_mongo_uri}")
-  private final val database: MongoDatabase = mongoClient.getDatabase(s"${arg_mongo_db}")
-  private final val collection: MongoCollection[Document] = database.getCollection(s"${arg_mongo_coll}")
+  private final val mongoClient: MongoClient = MongoClients.create(s"${Config.mongoUri}")
+  private final val database: MongoDatabase = mongoClient.getDatabase(s"${Config.mongoDB}")
+  private final val collection: MongoCollection[Document] = database.getCollection(s"${Config.mongoColl}")
 
   def updateState(userId: String, inputs: Iterator[Row], prevState: GroupState[mutable.Map[String, (Timestamp, String, String)]]): Iterator[OutputAnomaly] = {
 

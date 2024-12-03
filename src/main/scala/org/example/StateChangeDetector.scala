@@ -34,7 +34,7 @@ object StateChangeDetector {
     val kafkaStream = spark
       .readStream
       .format("kafka")
-      .option("kafka.bootstrap.servers", s"${arg_kafka_servers}")
+      .option("kafka.bootstrap.servers", s"${Config.kafkaSrvs}")
       .option("subscribe", "test1")
       .option("startingOffsets", "earliest")
       .option("failOnDataLoss", "true")
@@ -68,7 +68,7 @@ object StateChangeDetector {
       .trigger(Trigger.ProcessingTime("1 seconds"))
       .format("kafka")
       .outputMode("update")
-      .option("kafka.bootstrap.servers", s"${arg_kafka_servers}")
+      .option("kafka.bootstrap.servers", s"${Config.kafkaSrvs}")
       .option("topic", "test2")
       .option("checkpointLocation", "./ckpt_state")
       //.option("asyncProgressTrackingEnabled", "true")
