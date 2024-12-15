@@ -47,13 +47,16 @@ object UserStateHandler {
       }
       //// MONGO End ////
 
+      println(loginTime," ",locationEng," ",deviceId)
+
+
       /// StateStore Start ///
       storeUserState.get(userId) match {
         case Some((prev_loginTime, prev_locationEng, prev_deviceId)) =>
           val timeDiffMs = (loginTime.getTime - prev_loginTime.getTime)
-          val timeDiffMinutes = timeDiffMs.toDouble / (1000 * 60) // Convert milliseconds to minutes
+          val timeDiffSeconds = timeDiffMs.toDouble / 1000 // Convert milliseconds to seconds
 
-          if (timeDiffMinutes <= 1 && locationEng != prev_locationEng && deviceId != prev_deviceId) {
+          if (timeDiffSeconds <= Config.appAnomalyTFraS && locationEng != prev_locationEng && deviceId != prev_deviceId) {
             outputData = outputData :+ OutputAnomaly(this_userId, loginTime, prev_locationEng, locationEng, prev_deviceId, deviceId)
           }
 

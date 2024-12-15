@@ -35,7 +35,7 @@ object StateChangeDetector {
       .readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", s"${Config.kafkaSrvs}")
-      .option("subscribe", "test1")
+      .option("subscribe", s"${Config.kafkaLoginTopic}")
       .option("startingOffsets", "earliest")
       .option("failOnDataLoss", "true")
       .load()
@@ -57,7 +57,7 @@ object StateChangeDetector {
     // TODO amazon Deequ
 
     val processedStream = dqcStream
-      .withWatermark("loginTime", "3 minute")
+      .withWatermark("loginTime", s"${Config.appStreamWmk}")
       .groupByKey(row => row.getAs[String]("userId"))
       .flatMapGroupsWithState(OutputMode.Update()
         , GroupStateTimeout.EventTimeTimeout())(updateState)
@@ -65,12 +65,12 @@ object StateChangeDetector {
     processedStream.selectExpr("userId AS key",
         s"to_json(struct(loginTime,prev_locationEng,locationEng,prev_deviceId,deviceId)) AS value")
       .writeStream
-      .trigger(Trigger.ProcessingTime("1 seconds"))
+      .trigger(Trigger.ProcessingTime(s"${Config.appStreamTrgPT}"))
       .format("kafka")
       .outputMode("update")
       .option("kafka.bootstrap.servers", s"${Config.kafkaSrvs}")
-      .option("topic", "test2")
-      .option("checkpointLocation", "./ckpt_state")
+      .option("topic", s"${Config.kafkaNotifyTopic}")
+      .option("checkpointLocation", s"${Config.appCkptLoc}")
       //.option("asyncProgressTrackingEnabled", "true")
       .start()
       .awaitTermination()
