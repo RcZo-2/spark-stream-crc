@@ -22,9 +22,9 @@ object UserStateHandler {
   private final val database: MongoDatabase = mongoClient.getDatabase(s"${Config.mongoDB}")
   private final val collection: MongoCollection[Document] = database.getCollection(s"${Config.mongoColl}")
 
-  def updateState(userId: String, inputs: Iterator[Row], prevState: GroupState[mutable.Map[String, (Timestamp, String, String)]]): Iterator[OutputAnomaly] = {
+  def updateState(userId: String, inputs: Iterator[Row], state: GroupState[mutable.Map[String, (Timestamp, String, String)]]): Iterator[OutputAnomaly] = {
 
-    val storeUserState = prevState.getOption.getOrElse(mutable.Map[String
+    val storeUserState = state.getOption.getOrElse(mutable.Map[String
       , (Timestamp, String, String)]())
     var outputData: mutable.Seq[OutputAnomaly] = mutable.Seq.empty
 
@@ -47,25 +47,28 @@ object UserStateHandler {
       }
       //// MONGO End ////
 
-      println(loginTime," ",locationEng," ",deviceId)
 
-
-      /// StateStore Start ///
+      /// State logic Start ///
       storeUserState.get(userId) match {
         case Some((prev_loginTime, prev_locationEng, prev_deviceId)) =>
           val timeDiffMs = (loginTime.getTime - prev_loginTime.getTime)
           val timeDiffSeconds = timeDiffMs.toDouble / 1000 // Convert milliseconds to seconds
+          //println(userId, " ", timeDiffSeconds, " ", prev_locationEng, "->", locationEng, " ", prev_deviceId, "->", deviceId)
 
           if (timeDiffSeconds <= Config.appAnomalyTFraS && locationEng != prev_locationEng && deviceId != prev_deviceId) {
             outputData = outputData :+ OutputAnomaly(this_userId, loginTime, prev_locationEng, locationEng, prev_deviceId, deviceId)
           }
+          storeUserState(userId) = (loginTime, locationEng, deviceId)
 
         case None =>
-        //println("Mongo and StateStore both get nothing")
+          //println(userId, " ", loginTime, " ", locationEng, " ", deviceId)
+          storeUserState(userId) = (loginTime, locationEng, deviceId)
       }
-      storeUserState(userId) = (loginTime, locationEng, deviceId)
-      /// StateStore End ///
+
+      /// State logic End ///
     }
+    // Batch update
+    state.update(storeUserState)
 
     // Yields an iterator of anomalies
     val anomalies: Iterator[OutputAnomaly] = outputData.iterator

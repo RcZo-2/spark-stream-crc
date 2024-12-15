@@ -14,7 +14,7 @@ object StateChangeDetector {
   def main(args: Array[String]): Unit = {
     val sparkConf = new SparkConf().setAppName("StateChangeDetector")
 
-    lazy val spark = SparkSession.builder.config(sparkConf)
+    val spark = SparkSession.builder.config(sparkConf)
       .getOrCreate()
 
     import spark.implicits._
