@@ -4,12 +4,12 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions.{col, from_json}
 import org.apache.spark.sql.streaming.{GroupStateTimeout, OutputMode, Trigger}
-import org.apache.spark.sql.types.{StringType, StructField, StructType, TimestampType}
 import org.example.UserStateHandler.updateState
+import org.example.config.GeneralConfig
+import org.example.schema.SparkKafkaLoginMsg
 
 
 object StateChangeDetector {
-  private final val arg_kafka_servers: String = sys.env.getOrElse("ARG_KAFKA_SERVERS", "default_value")
 
   def main(args: Array[String]): Unit = {
     val sparkConf = new SparkConf().setAppName("StateChangeDetector")
@@ -19,28 +19,18 @@ object StateChangeDetector {
 
     import spark.implicits._
 
-    val msgSchema = StructType(Seq(
-      StructField("serviceItem", StringType),
-      StructField("functionItem", StringType),
-      StructField("loginTime", TimestampType),
-      StructField("loginType", StringType),
-      StructField("clientIp", StringType),
-      StructField("locationEng", StringType),
-      StructField("deviceId", StringType),
-      StructField("otpStatus", StringType),
-      StructField("dataSource", StringType)
-    ))
 
     val kafkaStream = spark
       .readStream
       .format("kafka")
-      .option("kafka.bootstrap.servers", s"${Config.kafkaSrvs}")
-      .option("subscribe", s"${Config.kafkaLoginTopic}")
+      .option("kafka.bootstrap.servers", s"${GeneralConfig.kafkaSrvs}")
+      .option("subscribe", s"${GeneralConfig.kafkaLoginTopic}")
       .option("startingOffsets", "earliest")
       .option("failOnDataLoss", "true")
       .load()
       .selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)", "timestamp")
 
+    val msgSchema = SparkKafkaLoginMsg.getSchema()
 
     val upStream = kafkaStream.select(
       col("key"),
@@ -57,7 +47,7 @@ object StateChangeDetector {
     // TODO amazon Deequ
 
     val processedStream = dqcStream
-      .withWatermark("loginTime", s"${Config.appStreamWmk}")
+      .withWatermark("loginTime", s"${GeneralConfig.appStreamWmk}")
       .groupByKey(row => row.getAs[String]("userId"))
       .flatMapGroupsWithState(OutputMode.Update()
         , GroupStateTimeout.EventTimeTimeout())(updateState)
@@ -65,12 +55,12 @@ object StateChangeDetector {
     processedStream.selectExpr("userId AS key",
         s"to_json(struct(loginTime,prev_locationEng,locationEng,prev_deviceId,deviceId)) AS value")
       .writeStream
-      .trigger(Trigger.ProcessingTime(s"${Config.appStreamTrgPT}"))
+      .trigger(Trigger.ProcessingTime(s"${GeneralConfig.appStreamTrgPT}"))
       .format("kafka")
       .outputMode("update")
-      .option("kafka.bootstrap.servers", s"${Config.kafkaSrvs}")
-      .option("topic", s"${Config.kafkaNotifyTopic}")
-      .option("checkpointLocation", s"${Config.appCkptLoc}")
+      .option("kafka.bootstrap.servers", s"${GeneralConfig.kafkaSrvs}")
+      .option("topic", s"${GeneralConfig.kafkaNotifyTopic}")
+      .option("checkpointLocation", s"${GeneralConfig.appCkptLoc}")
       //.option("asyncProgressTrackingEnabled", "true")
       .start()
       .awaitTermination()

@@ -1,9 +1,20 @@
-package org.example
+package org.example.config
 
 import com.typesafe.config.{Config, ConfigFactory}
+import org.example.config.ConfigLoader.loadConfig
 
-object Config {
-  val config: Config = ConfigFactory.load()
+private object ConfigLoader {
+  def loadConfig(): Config = {
+    val baseConfig = ConfigFactory.load()
+    val env = baseConfig.getString("environment.env")
+    val envConfig = ConfigFactory.parseResources(s"config/application-$env.conf")
+    baseConfig.withFallback(envConfig)
+  }
+}
+
+object GeneralConfig {
+
+  val config = loadConfig()
 
   val kafkaSrvs: String = config.getString("kafka.servers")
   val kafkaLoginTopic: String = config.getString("kafka.loginTopic")

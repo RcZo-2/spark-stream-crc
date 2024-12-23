@@ -5,22 +5,17 @@ import org.apache.spark.sql.streaming.GroupState
 import com.mongodb.client.model.Filters
 import com.mongodb.client.{MongoClient, MongoClients, MongoCollection, MongoDatabase}
 import org.bson.Document
+import org.example.config.GeneralConfig
+import org.example.schema.OutputAnomaly
 
 import java.sql.Timestamp
 import scala.collection.mutable
 
-case class OutputAnomaly(userId: String,
-                         loginTime: Timestamp,
-                         prev_locationEng: String,
-                         locationEng: String,
-                         prev_deviceId: String,
-                         deviceId: String
-                        )
 
 object UserStateHandler {
-  private final val mongoClient: MongoClient = MongoClients.create(s"${Config.mongoUri}")
-  private final val database: MongoDatabase = mongoClient.getDatabase(s"${Config.mongoDB}")
-  private final val collection: MongoCollection[Document] = database.getCollection(s"${Config.mongoColl}")
+  private final val mongoClient: MongoClient = MongoClients.create(s"${GeneralConfig.mongoUri}")
+  private final val database: MongoDatabase = mongoClient.getDatabase(s"${GeneralConfig.mongoDB}")
+  private final val collection: MongoCollection[Document] = database.getCollection(s"${GeneralConfig.mongoColl}")
 
   def updateState(userId: String, inputs: Iterator[Row], state: GroupState[mutable.Map[String, (Timestamp, String, String)]]): Iterator[OutputAnomaly] = {
 
@@ -55,7 +50,7 @@ object UserStateHandler {
           val timeDiffSeconds = timeDiffMs.toDouble / 1000 // Convert milliseconds to seconds
           //println(userId, " ", timeDiffSeconds, " ", prev_locationEng, "->", locationEng, " ", prev_deviceId, "->", deviceId)
 
-          if (timeDiffSeconds <= Config.appAnomalyTFraS && locationEng != prev_locationEng && deviceId != prev_deviceId) {
+          if (timeDiffSeconds <= GeneralConfig.appAnomalyTFraS && locationEng != prev_locationEng && deviceId != prev_deviceId) {
             outputData = outputData :+ OutputAnomaly(this_userId, loginTime, prev_locationEng, locationEng, prev_deviceId, deviceId)
           }
           storeUserState(userId) = (loginTime, locationEng, deviceId)
