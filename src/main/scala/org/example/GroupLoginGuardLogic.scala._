@@ -1,0 +1,108 @@
+package org.example
+
+import org.apache.log4j.Logger
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.streaming.GroupState
+import org.example.config.ConfigManager
+import org.example.schema.AnomalyResult
+import org.example.utils.TimeParser.parseTimeExpr
+
+import java.sql.Timestamp
+import scala.collection.mutable
+
+object GroupLoginGuardLogic {
+  private final val logger = Logger.getLogger(GroupLoginGuardLogic.getClass)
+
+  def runAnomalyUserStateProcess(customer_id: String, inputs: Iterator[Row], state: GroupState[mutable.Map[String, mutable.LinkedHashMap[(String, String, String), Long]]]): Iterator[AnomalyResult] = {
+    val config = ConfigManager.getConfig
+    // Read old state
+    val storedUserState = state.getOption.getOrElse(
+      mutable.Map[String, mutable.LinkedHashMap[(String, String, String), Long]]()
+    )
+
+    // No need to process data that comes too late
+    val ignoreTimeMs = state.getCurrentProcessingTimeMs() - parseTimeExpr(config.getString("app.msgIgnoreTime")) // 30 days
+    val filteredInputs = inputs.filter(row => row.getAs[Timestamp]("login_date").getTime > ignoreTimeMs)
+
+    // Sort in ascending, but only current batch
+    val sortedInputs = filteredInputs.toList.sortBy(row => row.getAs[Timestamp]("login_date").getTime)
+
+    // Assign output iterator
+    var outputData: mutable.Seq[AnomalyResult] = mutable.Seq.empty
+
+    // Set an expiration time for data deletion
+    val whitelistExpireTimeMs = state.getCurrentProcessingTimeMs() - parseTimeExpr(config.getString("app.whitelistRetentionTime"))
+
+    // Init an indicator for the usage of code that runs only once
+    var isMicroBatchStart = false
+
+    sortedInputs.foreach { row =>
+      val input_subsidiary = row.getAs[String]("subsidiary")
+      val input_login_date = row.getAs[Timestamp]("login_date").getTime //Unix Time (Long)
+      val login_date_ts = row.getAs[Timestamp]("login_date")
+      val input_login_country_code = row.getAs[String]("login_country_code")
+      val input_app_device_id = row.getAs[String]("app_device_id")
+      val input_model = row.getAs[String]("model")
+
+      //// State logic Start ////
+      storedUserState.get(customer_id) match {
+        case Some(loginTimelineMap) =>
+
+          // Keep whitelist data only for those that have not expired, and do this once when the micro batch begins
+          if (!isMicroBatchStart) {
+            loginTimelineMap.retain((keys, loginTime) => {
+              loginTime > whitelistExpireTimeMs
+            })
+            isMicroBatchStart = true
+          }
+
+          val isCaseS: Boolean = !loginTimelineMap.exists {
+            case ((device, model, country), loginTime) =>
+              device == input_app_device_id && country == input_login_country_code &&
+                input_login_date - loginTime < parseTimeExpr(config.getString("app.anomalousMoveTimeThreshold"))
+          }
+
+          val isCaseCD: Boolean = !loginTimelineMap.exists {
+            case ((device, model, country), loginTime) =>
+              device == input_app_device_id && country == input_login_country_code &&
+                input_login_date - loginTime < parseTimeExpr(config.getString("app.realtimeWhitelistThreshold"))
+          } &&
+            !loginTimelineMap.exists {
+              case ((device, model, country), loginTime) =>
+                device == input_app_device_id
+            } &&
+            !loginTimelineMap.takeRight(config.getInt("app.lastRecentLoginSets")).exists {
+              case ((device, model, country), loginTime) =>
+                model == input_model && country == input_login_country_code
+            }
+
+          logger.debug("---------- isCaseCD: " + isCaseCD + " ----------")
+
+          // Set new data in the map, remove it before adding to maintain the order
+          loginTimelineMap.remove((input_app_device_id, input_model, input_login_country_code))
+          loginTimelineMap.put((input_app_device_id, input_model, input_login_country_code), input_login_date)
+
+          // Set output data return to stream
+          outputData = outputData :+ AnomalyResult(customer_id, input_subsidiary, login_date_ts, input_login_country_code, input_login_country_code, input_app_device_id, input_app_device_id)
+          // Set user state
+          storedUserState(customer_id) = loginTimelineMap
+
+        case None =>
+          val initLoginTimelineMap = mutable.LinkedHashMap[(String, String, String), Long]()
+          initLoginTimelineMap.put((input_app_device_id, input_model, input_login_country_code), input_login_date)
+
+          // Set user state
+          storedUserState(customer_id) = initLoginTimelineMap
+      }
+      /// State logic End ///
+    }
+
+    logger.debug("--------------------")
+    // Save user state
+    state.update(storedUserState)
+
+    // Yields an iterator of anomalies
+    val anomalies: Iterator[AnomalyResult] = outputData.iterator
+    anomalies
+  }
+}

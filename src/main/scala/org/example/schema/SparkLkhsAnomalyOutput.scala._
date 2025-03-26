@@ -1,0 +1,11 @@
+package org.example.schema
+
+import org.apache.spark.sql.types.{StructField, StructType, TimestampType}
+
+object SparkLkhsAnomalyOutput {
+
+  def getSchema: StructType = {
+    StructType(Seq(
+      StructField("login_date", TimestampType)))
+  }
+}
