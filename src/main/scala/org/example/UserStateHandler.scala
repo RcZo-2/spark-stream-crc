@@ -2,74 +2,71 @@ package org.example
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.streaming.GroupState
-import com.mongodb.client.model.Filters
-import com.mongodb.client.{MongoClient, MongoClients, MongoCollection, MongoDatabase}
 import org.bson.Document
-import org.example.config.GeneralConfig
-import org.example.schema.OutputAnomaly
 
 import java.sql.Timestamp
 import scala.collection.mutable
 
+case class OutputAnomaly(userId: String,
+                         loginTime: Timestamp,
+                         locationEng: String
+                        )
+
+case class UserLocationInner(deviceType: mutable.LinkedHashMap[String, Long],
+                             country: mutable.LinkedHashMap[String, Long])
+
+case class UserLocation(uuidData: mutable.Map[String, UserLocationInner])
 
 object UserStateHandler {
-  private final val mongoClient: MongoClient = MongoClients.create(s"${GeneralConfig.mongoUri}")
-  private final val database: MongoDatabase = mongoClient.getDatabase(s"${GeneralConfig.mongoDB}")
-  private final val collection: MongoCollection[Document] = database.getCollection(s"${GeneralConfig.mongoColl}")
 
-  def updateState(userId: String, inputs: Iterator[Row], state: GroupState[mutable.Map[String, (Timestamp, String, String)]]): Iterator[OutputAnomaly] = {
+  def updateState(
+                   userId: String,
+                   inputs: Iterator[Row],
+                   state: GroupState[UserLocation]
+                 ): Iterator[String] = {
 
-    val storeUserState = state.getOption.getOrElse(mutable.Map[String
-      , (Timestamp, String, String)]())
-    var outputData: mutable.Seq[OutputAnomaly] = mutable.Seq.empty
+    var currentState = state.getOption
 
-    // foreach input
+    // Collect all alerts
+    val alerts = scala.collection.mutable.ListBuffer[String]()
+
+    // Process each value in the batch
     inputs.foreach { row =>
-      val this_userId = row.getAs[String]("userId")
-      val loginTime = row.getAs[Timestamp]("loginTime")
-      val locationEng = row.getAs[String]("locationEng")
-      val deviceId = row.getAs[String]("deviceId")
-
-      //// MONGO Start ////
-      val mongoCursor = collection.findOneAndDelete(Filters.eq("_id", this_userId))
-      if (mongoCursor == null) {
-        //println("Mongo get nothing")
-      }
-      else {
-        storeUserState(userId) = (loginTime,
-          mongoCursor.getString("locationEng"),
-          mongoCursor.getString("deviceId"))
-      }
-      //// MONGO End ////
-
-
-      /// State logic Start ///
-      storeUserState.get(userId) match {
-        case Some((prev_loginTime, prev_locationEng, prev_deviceId)) =>
-          val timeDiffMs = (loginTime.getTime - prev_loginTime.getTime)
-          val timeDiffSeconds = timeDiffMs.toDouble / 1000 // Convert milliseconds to seconds
-          //println(userId, " ", timeDiffSeconds, " ", prev_locationEng, "->", locationEng, " ", prev_deviceId, "->", deviceId)
-
-          if (timeDiffSeconds <= GeneralConfig.appAnomalyTFraS && locationEng != prev_locationEng && deviceId != prev_deviceId) {
-            outputData = outputData :+ OutputAnomaly(this_userId, loginTime, prev_locationEng, locationEng, prev_deviceId, deviceId)
-          }
-          storeUserState(userId) = (loginTime, locationEng, deviceId)
+      currentState match {
+        case Some(prevLocation) =>
+          //val timeDiff = row.getAs[Timestamp]("loginTime").getTime - prevLocation.loginTime.getTime
+          //if (timeDiff <= 3600 * 1000 && row.getAs[String]("locationEng") != prevLocation.locationEng) {
+          // User moved cities within 1 hour
+          //   alerts += s"Alert: User $userId moved from ${prevLocation.locationEng} to ${row.getAs[String]("locationEng")}"
+          // }
+          val userLocB = prevLocation.uuidData.getOrElseUpdate(
+            row.getAs[String]("deviceId"),
+            UserLocationInner(mutable.LinkedHashMap(), mutable.LinkedHashMap())
+          )
+          userLocB.deviceType += (row.getAs[String]("loginType") -> row.getAs[Timestamp]("loginTime").getTime)
+          userLocB.country += (row.getAs[String]("locationEng") -> row.getAs[Timestamp]("loginTime").getTime)
 
         case None =>
-          //println(userId, " ", loginTime, " ", locationEng, " ", deviceId)
-          storeUserState(userId) = (loginTime, locationEng, deviceId)
+          // Initialize the state with the first location
+          currentState = Some(UserLocation(mutable.Map(row.getAs[String]("deviceId") -> UserLocationInner(
+            mutable.LinkedHashMap(row.getAs[String]("loginType") -> row.getAs[Timestamp]("loginTime").getTime),
+            mutable.LinkedHashMap(row.getAs[String]("locationEng") -> row.getAs[Timestamp]("loginTime").getTime)
+          ))))
       }
-
-      /// State logic End ///
     }
-    // Batch update
-    state.update(storeUserState)
+    println(userId + " " + currentState)
+    // Update the state with the last location in the batch
+    currentState.foreach(state.update)
 
-    // Yields an iterator of anomalies
-    val anomalies: Iterator[OutputAnomaly] = outputData.iterator
-    anomalies
+    // Set the timeout to 1 hour to clean up stale states
+    state.setTimeoutDuration("10 seconds")
+
+    // Check if the state is timed out
+    if (state.hasTimedOut) {
+      // Remove the state
+      state.remove()
+    }
+
+    alerts.iterator
   }
-
 }
-
-
